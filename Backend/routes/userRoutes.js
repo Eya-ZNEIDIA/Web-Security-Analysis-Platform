@@ -1,12 +1,14 @@
-///// routes/userRoutes.js
 const express = require("express");
 const router = express.Router();
-const userController = require("../controllers/userController");
+const controller = require("../controllers/userController");
+const { protect } = require("../middlewares/authMiddleware");
 
-router.post("/ajouter", userController.ajouterUtilisateur);
-router.get("/:id", userController.getUtilisateurById);
-router.put("/:id", userController.updateUtilisateur);
-router.delete("/:id", userController.deleteUtilisateur);
+router.post("/register", controller.register);
+router.post("/login", controller.login);
 
+router.post("/", protect, controller.ajouterUtilisateur);
+router.get("/:id", protect, controller.getUtilisateurById);
+router.put("/:id", protect, controller.updateUtilisateur);
+router.delete("/:id", protect, controller.deleteUtilisateur);
 
 module.exports = router;

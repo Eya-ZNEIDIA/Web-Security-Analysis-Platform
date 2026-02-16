@@ -15,6 +15,9 @@ connectDB();
 
 // Routes
 app.use("/api/users", require("./routes/userRoutes"));
+app.use("/api/vulnerabilites", require("./routes/vulnerabiliteRoutes"));
+app.use("/api/rapports", require("./routes/rapportRoutes"));
+app.use("/api/audits", require("./routes/auditRoutes"));
 
 // Lancer le serveur
 const PORT = process.env.PORT || 5000;
