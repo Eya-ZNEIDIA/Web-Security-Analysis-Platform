@@ -3,12 +3,12 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
 exports.register = async (req, res) => {
-  const { nom, prenom, email, mdp } = req.body;
-
   try {
+    const { nom, prenom, email, mdp } = req.body;
+
     const userExiste = await User.findOne({ email });
     if (userExiste) {
-      return res.status(400).json({ message: "Utilisateur déjà existant" });
+      return res.status(400).json({ message: "Email déjà utilisé" });
     }
 
     const hashedPassword = await bcrypt.hash(mdp, 10);
@@ -18,23 +18,24 @@ exports.register = async (req, res) => {
       prenom,
       email,
       mdp: hashedPassword,
-      role: "user"
+      role: "user",
+      image: req.file ? req.file.filename : null
     });
 
     res.status(201).json({
-      message: "Inscription réussie",
-      user: {
-        id: user._id,
-        nom: user.nom,
-        email: user.email,
-        role: user.role
-      }
+      _id: user._id,
+      nom: user.nom,
+      email: user.email,
+      image: user.image,
     });
 
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
+
+
 
 exports.login = async (req, res) => {
   const { email, mdp } = req.body;
@@ -64,6 +65,26 @@ exports.login = async (req, res) => {
         email: user.email,
         role: "user"
       }
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+exports.uploadImage = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur non trouvé" });
+    }
+
+    user.image = req.file.filename;
+    await user.save();
+
+    res.json({
+      message: "Image mise à jour",
+      image: user.image
     });
 
   } catch (error) {
