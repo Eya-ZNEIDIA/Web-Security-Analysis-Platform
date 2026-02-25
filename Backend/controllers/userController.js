@@ -17,7 +17,7 @@ exports.register = async (req, res) => {
       nom,
       prenom,
       email,
-      mdp: hashedPassword,
+      mdp,
       role: "user",
       image: req.file ? req.file.filename : null
     });
