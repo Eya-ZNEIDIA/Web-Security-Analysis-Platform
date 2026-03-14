@@ -6,11 +6,6 @@ prenom: String,
 email: { type: String, unique: true },
 mdp: String,
  image: { type: String },
- role: { 
-    type: String, 
-    enum: ["user", "admin"], 
-    default: "user"           
-  }
 }, { timestamps: true });
 userSchema.pre("save", async function() {
   if (!this.isModified("mdp")) return ;
