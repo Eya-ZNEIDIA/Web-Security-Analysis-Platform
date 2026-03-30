@@ -91,9 +91,22 @@ class AuditService {
       console.log(" Audit terminé :", targetUrl);
 
       return {
-        success: true,
-        report
-      };
+  success: true,
+
+  scoreGlobal: riskScore,
+
+  vulnerabilities: vulnerabilities.map((v, i) => ({
+    id: `V-${i}`,
+    severity: v.severity,
+    title: v.type,
+    description: v.description,
+    fix: v.recommendation
+  })),
+
+  recommendations: vulnerabilities.map(v => v.recommendation),
+
+  headers: [], // تنجم تزيدها بعد
+};
 
     } catch (error) {
       console.error(" Erreur Audit :", error.message);
