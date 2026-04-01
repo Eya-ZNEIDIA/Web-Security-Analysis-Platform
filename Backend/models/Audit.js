@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const AuditSchema = new mongoose.Schema({
   date: Date,
   statut: String,
-  urlCible: { type: mongoose.Schema.Types.ObjectId, ref: "URL" },
+  urlCible: String,
   requetes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Requete" }],
   reponses: [{ type: mongoose.Schema.Types.ObjectId, ref: "Reponse" }],
   rapport: { type: mongoose.Schema.Types.ObjectId, ref: "Rapport" }

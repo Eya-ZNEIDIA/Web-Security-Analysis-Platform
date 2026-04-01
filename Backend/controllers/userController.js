@@ -17,8 +17,8 @@ exports.register = async (req, res) => {
       nom,
       prenom,
       email,
-      mdp: hashedPassword,
-      role: "user",
+      mdp,
+       role: req.body.role || "user",
       image: req.file ? req.file.filename : null
     });
 
@@ -52,7 +52,7 @@ exports.login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user._id, role: "user", nom: user.nom },
+      { id: user._id, role: user.role, nom: user.nom },
       process.env.JWT_SECRET,
       { expiresIn: "1h" }
     );
@@ -63,7 +63,7 @@ exports.login = async (req, res) => {
         id: user._id,
         nom: user.nom,
         email: user.email,
-        role: "user"
+        role: user.role
       }
     });
 
@@ -108,7 +108,7 @@ exports.ajouterUtilisateur = async (req, res) => {
       prenom,
       email,
       mdp: hashedPassword,
-      role: "user"
+      role: req.body.role || "user"
     });
 
     res.status(201).json({

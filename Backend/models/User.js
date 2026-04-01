@@ -5,6 +5,7 @@ nom: { type: String, required: true },
 prenom: String,
 email: { type: String, unique: true },
 mdp: String,
+role: { type: String, enum: ["admin", "user"], default: "user" },
  image: { type: String },
 }, { timestamps: true });
 userSchema.pre("save", async function() {

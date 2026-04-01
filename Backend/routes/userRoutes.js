@@ -1,16 +1,16 @@
 const express = require("express");
 const router = express.Router();
 const controller = require("../controllers/userController");
-const { protect } = require("../middlewares/authMiddleware");
+const { protect, authorizeRoles } = require("../middlewares/authMiddleware");
 const upload = require("../middlewares/uploadMiddleware");
 router.post("/register",upload.single("image"), controller.register);
 router.post("/login", controller.login);
 
 router.put("/upload-image",protect,upload.single("image"),controller.uploadImage);
-router.post("/", protect, controller.ajouterUtilisateur);
 router.get("/:id", protect, controller.getUtilisateurById);
 router.put("/:id", protect, controller.updateUtilisateur);
-router.delete("/:id", protect, controller.deleteUtilisateur);
+router.post("/ajouter", protect, authorizeRoles(["admin"]), controller.ajouterUtilisateur);
+router.delete("/:id", protect, authorizeRoles(["admin"]), controller.deleteUtilisateur);
 
 
 
