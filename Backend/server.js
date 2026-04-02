@@ -3,7 +3,7 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const connectDB = require("./config/db");
 const aiRoutes = require("./routes/aiRoutes");
-const AuditService = require("./Services/AuditService");
+const AuditService = require("./services/AuditService");
 
 dotenv.config();
 const app = express();
@@ -23,6 +23,7 @@ app.use("/api/audits", require("./routes/auditRoutes"));
 const path = require("path");
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/ai", aiRoutes)
+app.use("/api/stats", require("./routes/statsRoutes"));
 app.post("/api/audit/launch", async (req, res) => {
   const { targetUrl, intensity } = req.body; 
 

@@ -105,7 +105,7 @@ class AuditService {
 
   recommendations: vulnerabilities.map(v => v.recommendation),
 
-  headers: [], // تنجم تزيدها بعد
+  headers:[],
 };
 
     } catch (error) {

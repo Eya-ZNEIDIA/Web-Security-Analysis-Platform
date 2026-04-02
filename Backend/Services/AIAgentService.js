@@ -30,19 +30,15 @@ ${JSON.stringify(context.forms, null, 2)}
 
 Niveau d'intensité : ${intensity}
 
-Génère au moins 40 scénarios de tests différents pour détecter :
-
-- XSS
-- SQL Injection
-- Command Injection
-- Path Traversal
-- Open Redirect
-- SSRF
-- IDOR
+Tâche : Génère EXACTEMENT 40 scénarios répartis comme suit : - 6 XSS - 6 SQL Injection - 6 Command Injection - 6 Path Traversal - 6 Open Redirect - 5 SSRF - 5 IDOR
 
 Si aucun endpoint n’est détecté, crée des tests basés sur les headers et la configuration du serveur.
 
-Retourne uniquement un JSON valide.
+Return ONLY a valid JSON array.
+No explanation.
+No markdown.
+No text before or after.
+If you fail, return [].
 
 Format :
 [
@@ -69,8 +65,24 @@ Ne rajoute aucun texte avant ou après.
       });
 
       const raw = response.message.content;
-      const match = raw.match(/\[.*\]/s);
-      let scenarios = match ? JSON.parse(match[0]) : [];
+
+let scenarios = [];
+
+try {
+  const start = raw.indexOf("[");
+  const end = raw.lastIndexOf("]");
+
+  if (start !== -1 && end !== -1) {
+    const jsonString = raw.substring(start, end + 1);
+    scenarios = JSON.parse(jsonString);
+  } else {
+    console.log("No JSON found in AI response");
+  }
+} catch (e) {
+  console.log("JSON parse error:", e.message);
+  console.log("RAW AI:", raw);
+  scenarios = [];
+}
 
  
       scenarios = scenarios.map(s => ({
