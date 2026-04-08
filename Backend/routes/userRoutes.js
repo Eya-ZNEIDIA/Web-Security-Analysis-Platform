@@ -13,8 +13,11 @@ router.put("/upload-image", protect, upload.single("image"), controller.uploadIm
 
 router.post("/ajouter", protect, authorizeRoles(["admin"]), controller.ajouterUtilisateur);
 router.delete("/:id", protect, authorizeRoles(["admin"]), controller.deleteUtilisateur);
-
+router.get("/profile/:id", protect, controller.getUserProfile);
+router.put("/:id/profile", protect, controller.updateProfileAndPassword);
+// Route générique ID (après /profile)
 router.get("/:id", protect, controller.getUtilisateurById);
 router.put("/:id", protect, controller.updateUtilisateur);
+ 
 
 module.exports = router;
