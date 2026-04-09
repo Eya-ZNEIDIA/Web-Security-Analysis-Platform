@@ -6,8 +6,9 @@ const connectDB = require("./config/db");
 const aiRoutes = require("./routes/aiRoutes");
 const AuditService = require("./services/AuditService");
 const dashboardRoutes = require("./routes/dashboardRoutes");
-const { protect } = require("./middlewares/authMiddleware"); // ✅ Importer depuis authMiddleware
-const Alert = require("./models/Alert"); // ✅ Importer le modèle Alert
+const { protect } = require("./middlewares/authMiddleware"); 
+const authRoutes = require("./routes/authRoutes");
+const Alert = require("./models/Alert"); 
 dotenv.config();
 
 const app = express();
@@ -27,7 +28,7 @@ app.use("/api/audits", require("./routes/auditRoutes"));
 app.use("/api/ai", aiRoutes);
 app.use("/api/stats", require("./routes/statisticsRoutes"));
 app.use("/api/dashboard", dashboardRoutes);
-
+app.use("/api/auth", authRoutes);
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/alerts", require("./routes/alertRoutes"));
 // ✅ CORRIGÉ : Route d'audit avec authentification et récupération du userId

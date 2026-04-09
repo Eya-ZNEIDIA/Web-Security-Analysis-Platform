@@ -172,22 +172,48 @@ exports.login = async (req, res) => {
     const isMatch = await bcrypt.compare(mdp, user.mdp);
     if (!isMatch) return res.status(400).json({ success: false, message: "Identifiants invalides" });
 
-    const token = jwt.sign({ id: user._id, role: user.role, nom: user.nom }, process.env.JWT_SECRET, { expiresIn: "1h" });
+    const token = jwt.sign(
+      { id: user._id, role: user.role, nom: user.nom },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
+    );
 
     res.json({
       success: true,
       token,
-      user: { id: user._id, nom: user.nom, email: user.email, role: user.role }
+      user: {
+        id: user._id,
+        _id: user._id,
+        nom: user.nom,
+        prenom: user.prenom,       // ✅
+        email: user.email,
+        role: user.role,
+        image: user.image,         // ✅
+        profile: user.profile,     // ✅
+        notifications: user.notifications, // ✅
+        security: user.security,   // ✅
+        prefs: user.prefs,         // ✅
+      }
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Erreur serveur", error: error.message });
   }
 };
-
 // ================= UPLOAD IMAGE =================
 exports.uploadImage = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    // ✅ Supporte les deux formes selon ce que le middleware injecte
+    const userId = req.user._id || req.user.id;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Non authentifié" });
+    }
+    
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "Aucun fichier reçu" });
+    }
+
+    const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: "Utilisateur non trouvé" });
 
     user.image = req.file.filename;
@@ -198,7 +224,6 @@ exports.uploadImage = async (req, res) => {
     res.status(500).json({ success: false, message: "Erreur serveur", error: error.message });
   }
 };
-
 // ================= ADMIN: ADD USER =================
 exports.ajouterUtilisateur = async (req, res) => {
   try {

@@ -9,7 +9,8 @@ const userSchema = new mongoose.Schema({
   mdp: { type: String, required: true },
   role: { type: String, enum: ["admin", "user"], default: "user" },
   image: { type: String, default: "" },
-
+  resetPasswordToken: { type: String },
+  resetPasswordExpire: { type: Date },
   // 🔹 Profil
   profile: {
     company: { type: String, default: "" },
