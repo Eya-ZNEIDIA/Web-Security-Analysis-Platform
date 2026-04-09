@@ -9,6 +9,8 @@ const dashboardRoutes = require("./routes/dashboardRoutes");
 const { protect } = require("./middlewares/authMiddleware"); 
 const authRoutes = require("./routes/authRoutes");
 const Alert = require("./models/Alert"); 
+const settingsRoutes = require("./routes/settingsRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");  
 dotenv.config();
 
 const app = express();
@@ -31,6 +33,8 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/alerts", require("./routes/alertRoutes"));
+app.use("/api", settingsRoutes);
+app.use("/api", notificationRoutes);
 // ✅ CORRIGÉ : Route d'audit avec authentification et récupération du userId
 app.post("/api/audit/launch", protect, async (req, res) => {
   const { targetUrl, intensity } = req.body;
