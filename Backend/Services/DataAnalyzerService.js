@@ -247,7 +247,7 @@ class DataAnalyzerService {
       await this.enforceRateLimit();
 
       const response = await axios.get(url, {
-        timeout: 5000,
+        timeout: 10000,
         maxRedirects: 3,
         headers: {
           "User-Agent": "Mozilla/5.0 SecurityScanner"
@@ -275,7 +275,13 @@ class DataAnalyzerService {
 
       });
 
-      const crawledEndpoints = await CrawlerService.crawl(url);
+      let crawledEndpoints = [];
+
+try {
+  crawledEndpoints = await CrawlerService.crawl(url);
+} catch (e) {
+  console.log("Crawler failed:", e.message);
+}
 
       crawledEndpoints.forEach(e => endpoints.add(e));
 

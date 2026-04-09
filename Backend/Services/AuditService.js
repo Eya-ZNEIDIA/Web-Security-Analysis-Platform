@@ -1,121 +1,140 @@
+const Audit = require("../models/Audit");
+const Rapport = require("../models/Rapport");
+const Vulnerabilite = require("../models/Vulnerabilite");
+const Alert = require("../models/Alert");
 const ValidationService = require("./ValidationService");
 const DataAnalyzerService = require("./DataAnalyzerService");
 const TestEngineService = require("./TestEngineService");
 const RiskEngineService = require("./RiskEngineService");
-const ReportService = require("./ReportService");
 const AIAgentService = require("./AIAgentService");
-const Vulnerabilite = require("../models/Vulnerabilite");
-const Audit = require("../models/Audit");
-const Rapport = require("../models/Rapport");
+
 class AuditService {
+  static async launchAudit({ targetUrl, intensity = "medium", userId }) {
+    console.log("AuditService: userId reçu =", userId);
+    if (!userId) throw new Error("userId manquant dans AuditService");
 
-  static async launchAudit({ targetUrl, intensity = "medium" }) {
-    try {
-      console.log("Lancement audit :", targetUrl);
+    console.log("Lancement audit :", targetUrl);
 
-      await ValidationService.validateURL(targetUrl);
-      await ValidationService.verifyAuthorization(targetUrl);
+    await ValidationService.validateURL(targetUrl);
+    await ValidationService.verifyAuthorization(targetUrl);
 
-      console.log("URL validée et autorisée");
+    const initialData = await DataAnalyzerService.collectInitialData(targetUrl);
+    const scenarios = await AIAgentService.generateTestScenarios(initialData, intensity);
+    const rawResults = await TestEngineService.executeScenarios(targetUrl, scenarios);
+    const technicalAnalysis = DataAnalyzerService.analyzeRawResults(rawResults);
+    const vulnerabilities = await AIAgentService.analyzeSecurityResults(technicalAnalysis);
+    const riskScore = RiskEngineService.calculateGlobalRiskScore(vulnerabilities);
 
-      const initialData = await DataAnalyzerService.collectInitialData(targetUrl);
-      console.log("Données initiales collectées :", initialData);
+    const headersRaw = initialData.headers || [];
+    const headers = Array.isArray(headersRaw)
+      ? headersRaw
+      : Object.entries(headersRaw).map(([key, value]) => ({
+          name: key,
+          present: value != null,
+          critical: false
+        }));
 
-      let scenarios = await AIAgentService.generateTestScenarios(initialData, intensity);
+    const recommendations = vulnerabilities
+      .map(v => v.recommendation)
+      .filter(r => r);
 
-      if (!scenarios || scenarios.length === 0) {
-        throw new Error("Aucun scénario généré par l'IA");
-      }
+    // 🔹 Création Audit
+    const newAudit = await Audit.create({
+      userId,
+      date: new Date(),
+      statut: "terminé",
+      urlCible: targetUrl,
+      requetes: [],
+      reponses: [],
+      rapport: null,
+      headers: headers,
+      recommendations: recommendations,
+      scoreGlobal: riskScore
+    });
+    console.log("Audit créé avec ID:", newAudit._id);
 
-      console.log(`${scenarios.length} scénarios générés par l'IA`);
+    // 🔹 Création Vulnérabilités et Alertes
+    const savedVulns = [];
+    const alerts = [];
 
-      const rawResults = await TestEngineService.executeScenarios(targetUrl, scenarios);
-      console.log(` Tests exécutés sur ${rawResults.length} endpoints`);
+    const severityMap = {
+      "critical": "Critique",
+      "Critique": "Critique",
+      "high": "Élevé",
+      "Élevé": "Élevé",
+      "medium": "Moyen",
+      "Moyen": "Moyen",
+      "low": "Faible",
+      "Faible": "Faible"
+    };
 
-      const technicalAnalysis = DataAnalyzerService.analyzeRawResults(rawResults);
-      console.log(" Analyse technique terminée");
+    for (const v of vulnerabilities) {
+      const mappedSeverity = severityMap[v.severity] || "Moyen";
 
-      const vulnerabilities = await AIAgentService.analyzeSecurityResults(technicalAnalysis);
-      console.log(` Vulnérabilités détectées : ${vulnerabilities.length}`);
-
-      const riskScore = RiskEngineService.calculateGlobalRiskScore(vulnerabilities);
-      console.log(" Risk score calculé :", riskScore);
-
-      const report = ReportService.generateAuditReport({
-        targetUrl,
-        intensity,
-        initialData,
-        technicalAnalysis,
-        vulnerabilities,
-        riskScore
+      const vuln = await Vulnerabilite.create({
+        userId,
+        auditId: newAudit._id,
+        type: v.type,
+        niveauRisque: mappedSeverity,
+        description: v.description,
+        recommandation: v.recommendation,
+        priorite: "à définir",
+        category: v.category || "Général",   // valeur par défaut
+        score: Number(v.score) || 0            
       });
+      savedVulns.push(vuln._id);
 
-      const savedVulns = [];
-
-      for (const v of vulnerabilities) {
-
-         const vuln = new Vulnerabilite({
-          type: v.type,
-          niveauRisque: v.severity,         
-          description: v.description,
-          recommandation: v.recommendation, 
-          priorite: "à définir"             
-       });
-
-
-  await vuln.save();
-  savedVulns.push(vuln._id);
-}
-   
-
-      const newReport = new Rapport({
-        dateGeneration: new Date(),
-        resume: `Audit pour ${targetUrl}`,
-        scoreGlobal: riskScore,
-        vulnerabilites: savedVulns
+      const alert = await Alert.create({
+        userId,
+        auditId: newAudit._id,
+        vulnerabiliteId: vuln._id,
+        level: mappedSeverity,
+        title: v.type,
+        message: `Nouvelle vulnérabilité détectée: ${v.type}`,
+        description: v.description,
+        urlCible: targetUrl,
+        read: false
       });
-      await newReport.save();
-
-      const newAudit = new Audit({
-        date: new Date(),
-        statut: "terminé",
-        urlCible: targetUrl,  
-        requetes: [],        
-        reponses: [],       
-        rapport: newReport._id
-      });
-      await newAudit.save();
-
-      console.log("Audit et rapport sauvegardés dans la BD");
-
-      console.log(" Audit terminé :", targetUrl);
-
-      return {
-  success: true,
-
-  scoreGlobal: riskScore,
-
-  vulnerabilities: vulnerabilities.map((v, i) => ({
-    id: `V-${i}`,
-    severity: v.severity,
-    title: v.type,
-    description: v.description,
-    fix: v.recommendation
-  })),
-
-  recommendations: vulnerabilities.map(v => v.recommendation),
-
-  headers: [], // تنجم تزيدها بعد
-};
-
-    } catch (error) {
-      console.error(" Erreur Audit :", error.message);
-
-      return {
-        success: false,
-        error: error.message
-      };
+      alerts.push(alert._id);
+      console.log("Alerte créée:", alert._id);
     }
+    console.log("Vulnérabilités et alertes créées:", savedVulns.length);
+
+    // 🔹 Création Rapport ✅ CECI ÉTAIT MANQUANT
+    const newReport = await Rapport.create({
+      dateGeneration: new Date(),
+      resume: `Audit pour ${targetUrl}`,
+      scoreGlobal: riskScore,
+      vulnerabilites: savedVulns,
+      headers: headers,
+      recommendations: recommendations
+    });
+
+    newAudit.rapport = newReport._id;
+    await newAudit.save();
+    console.log("Rapport créé avec ID:", newReport._id);
+
+    // ✅ RETOURNER LA RÉPONSE
+    return {
+      success: true,
+      auditId: newAudit._id,
+      reportId: newReport._id,
+      scoreGlobal: riskScore,
+      headers: headers.map(h => ({
+        name: h.name || h,
+        present: h.present !== false,
+        critical: h.critical || false
+      })),
+      vulnerabilities: vulnerabilities.map((v, i) => ({
+        id: `V-${i}`,
+        severity: v.severity,
+        title: v.type,
+        description: v.description,
+        fix: v.recommendation
+      })),
+      recommendations: recommendations,
+      alerts: alerts
+    };
   }
 }
 

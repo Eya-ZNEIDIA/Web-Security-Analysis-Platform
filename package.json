@@ -1,0 +1,31 @@
+{
+  "name": "web-security-analysis-platform",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Eya-ZNEIDIA/Web-Security-Analysis-Platform.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Eya-ZNEIDIA/Web-Security-Analysis-Platform/issues"
+  },
+  "homepage": "https://github.com/Eya-ZNEIDIA/Web-Security-Analysis-Platform#readme",
+  "dependencies": {
+    "axios": "^1.13.5",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.2.1",
+    "uuid": "^13.0.0"
+  }
+}
