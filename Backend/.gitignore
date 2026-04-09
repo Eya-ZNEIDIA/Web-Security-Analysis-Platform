@@ -1,2 +1,10 @@
+# Ignore uploaded images or user photos
+src/assets/uploads/
+public/uploads/
+*.log
+
+# Node modules
 node_modules/
+
+# Environment files
 .env
