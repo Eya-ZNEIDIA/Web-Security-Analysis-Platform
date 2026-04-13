@@ -8,6 +8,6 @@ const VulnerabiliteSchema = new mongoose.Schema({
   recommandation: String,
   priorite: String,
   category: String, // pour radar chart
-  score: Number,  
+  risk_score: Number,  
 });
 module.exports = mongoose.model("Vulnerabilite", VulnerabiliteSchema);

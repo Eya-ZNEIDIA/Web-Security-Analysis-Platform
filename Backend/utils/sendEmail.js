@@ -1,28 +1,23 @@
 const nodemailer = require("nodemailer");
 
 const sendEmail = async (to, subject, text, html = null) => {
-  try {
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: "zneidiaeya@gmail.com",
-        pass: "rgtf jjuz sjbn pcbr"
-      }
-    });
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_APP_PASS,
+    },
+  });
 
-    // ✅ Capturer info + envoyer html si disponible
-    const info = await transporter.sendMail({
-      from: '"SecureScan" <zneidiaeya@gmail.com>',
-      to,
-      subject,
-      text,                        // fallback texte brut
-      html: html || text,          // ✅ version HTML si fournie
-    });
+  const info = await transporter.sendMail({
+    from: process.env.MAIL_FROM || `"SecureScan" <${process.env.GMAIL_USER}>`,
+    to,
+    subject,
+    text,
+    html: html || text,
+  });
 
-    console.log("Email envoyé :", info.response);
-  } catch (err) {
-    console.error("Erreur nodemailer :", err);
-  }
+  return info;
 };
 
 module.exports = sendEmail;

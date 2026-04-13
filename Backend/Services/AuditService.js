@@ -85,7 +85,7 @@ class AuditService {
           recommandation: v.recommendation,
           priorite: "à définir",
           category: v.category || "Général",
-          score: Number(v.score) || 0
+          risk_score: Number(v.risk_score) || 0
         });
         savedVulns.push(vuln._id);
 
