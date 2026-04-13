@@ -11,6 +11,8 @@ const authRoutes = require("./routes/authRoutes");
 const Alert = require("./models/Alert"); 
 const settingsRoutes = require("./routes/settingsRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");  
+const adminSettingsRoutes = require("./routes/adminSettingsRoutes");
+
 dotenv.config();
 
 const app = express();
@@ -35,7 +37,8 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/alerts", require("./routes/alertRoutes"));
 app.use("/api", settingsRoutes);
 app.use("/api", notificationRoutes);
-// ✅ CORRIGÉ : Route d'audit avec authentification et récupération du userId
+app.use("/api/admin/settings", adminSettingsRoutes);
+
 app.post("/api/audit/launch", protect, async (req, res) => {
   const { targetUrl, intensity } = req.body;
   const userId = req.user.id; // ✅ Récupère l'ID de l'utilisateur depuis le middleware
