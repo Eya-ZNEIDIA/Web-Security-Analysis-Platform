@@ -2,7 +2,7 @@ const Audit = require("../models/Audit");
 const URL = require("../models/Url");
 const User = require("../models/User");
 const sendEmail = require("../utils/sendEmail");
-
+const AdminSettings =require("../models/AdminSettings");
 exports.createAudit = async (req, res) => {
   try {
     const { adresse } = req.body;
@@ -138,7 +138,61 @@ exports.completeAudit = async (req, res) => {
         console.error("Email scan complete failed:", e.message || e)
       );
     }
+   // ✅ 3) envoyer email à l'admin si activé dans AdminSettings
+try {
+  const adminSettings = await AdminSettings.findOne().select("notifications");
+  const enabled = adminSettings?.notifications?.auditEmailToAdmin;
 
+  if (enabled) {
+    const adminEmail = process.env.ADMIN_EMAIL;
+    if (!adminEmail) {
+      console.warn("ADMIN_EMAIL not set, cannot send admin audit email.");
+    } else {
+      const userName =
+        `${u?.prenom || ""} ${u?.nom || ""}`.trim() || u?.email || "Utilisateur";
+
+      const target = audit?.urlCible?.adresse || "—";
+      const score =
+        typeof audit.scoreGlobal === "number"
+          ? audit.scoreGlobal
+          : req.body?.scoreGlobal ?? "—";
+
+      const subject = "Audit terminé — SecureAudit (Admin)";
+      const text =
+        `Un audit vient d’être terminé.\n\n` +
+        `Utilisateur: ${userName}\n` +
+        `Email: ${u?.email || "—"}\n` +
+        `Cible: ${target}\n` +
+        `Score: ${score}\n` +
+        `Audit ID: ${audit._id}\n`;
+
+      const appUrl = process.env.APP_URL || "http://localhost:5173";
+      const reportUrl = `${appUrl}/admin/audits/${audit._id}`;
+
+      const html = `
+        <div style="font-family:Arial,sans-serif">
+          <h3>Audit terminé</h3>
+          <ul>
+            <li><b>Utilisateur:</b> ${userName}</li>
+            <li><b>Email:</b> ${u?.email || "—"}</li>
+            <li><b>Cible:</b> ${target}</li>
+            <li><b>Score:</b> ${score}</li>
+            <li><b>Audit ID:</b> ${audit._id}</li>
+          </ul>
+          <p>
+            <a href="${reportUrl}">Ouvrir dans le dashboard admin</a>
+          </p>
+        </div>
+      `;
+
+      sendEmail(adminEmail, subject, text, html).catch((e) =>
+        console.error("Email admin audit failed:", e.message || e)
+      );
+    }
+  }
+} catch (e) {
+  console.error("Admin email block failed:", e.message || e);
+}
     res.json({ success: true, audit });
   } catch (err) {
     console.error(err);
