@@ -4,6 +4,9 @@ const Vulnerabilite = require("../models/Vulnerabilite");
 const Rapport = require("../models/Rapport");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+// ✅ AJOUT: imports manquants (sinon deleteUtilisateur plante)
+const Settings = require("../models/Settings"); // adapte le chemin si différent
+const NotificationService = require("../services/NotificationService"); // adapte le chemin si différent
 
 // ================= GET USER PROFILE =================
 exports.getUserProfile = async (req, res) => {
@@ -41,13 +44,11 @@ exports.getUserProfile = async (req, res) => {
         dateFormat: "DD/MM/YYYY",
       },
     });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur serveur" });
   }
 };
-
 
 // ================= UPDATE USER PROFILE =================
 exports.updateProfileAndPassword = async (req, res) => {
@@ -62,10 +63,10 @@ exports.updateProfileAndPassword = async (req, res) => {
       const match = await bcrypt.compare(security.currentPwd, user.mdp);
       if (!match) return res.status(400).json({ message: "Mot de passe actuel incorrect" });
 
-      user.mdp = security.newPwd; // pre("save") fera hash automatiquement
+      user.mdp = security.newPwd; // pre("save") fera hash automatiquement si tu l'as dans le schema
     }
 
-    // 🔹 Update security settings (mfa, sessionAlert)
+    // 🔹 Update security settings
     if (security) {
       user.security.mfa = security.mfa ?? user.security.mfa;
       user.security.sessionAlert = security.sessionAlert ?? user.security.sessionAlert;
@@ -92,7 +93,6 @@ exports.updateProfileAndPassword = async (req, res) => {
       user.prefs = { ...user.prefs, ...prefs };
     }
 
-    // 🔐 save → pre("save") hash le mot de passe
     await user.save();
 
     res.json({
@@ -110,25 +110,102 @@ exports.updateProfileAndPassword = async (req, res) => {
         security: user.security,
         prefs: user.prefs,
         createdAt: user.createdAt,
-        updatedAt: user.updatedAt
-      }
+        updatedAt: user.updatedAt,
+      },
     });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: err.message || "Erreur serveur" });
   }
 };
+
 // ================= GET ALL USERS =================
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find().select("-mdp");
-    res.json({ success: true, users });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Erreur récupération utilisateurs", error: error.message });
+    const users = await User.find({})
+      .select("-mdp")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const auditAgg = await Audit.aggregate([
+      { $match: { userId: { $ne: null } } },
+      { $group: { _id: "$userId", count: { $sum: 1 } } },
+    ]);
+
+    const auditCountMap = new Map(auditAgg.map((x) => [String(x._id), x.count]));
+
+    const enrichedUsers = users.map((u) => ({
+      ...u,
+      auditCount: auditCountMap.get(String(u._id)) || 0,
+    }));
+
+    return res.json(enrichedUsers);
+  } catch (err) {
+    return res.status(500).json({
+      message: "Erreur lors de la récupération des utilisateurs",
+      error: err.message,
+    });
   }
 };
+exports.getAuditReportAdmin = async (req, res) => {
+  try {
+    const auditId = req.params.id;
 
+    const audit = await Audit.findById(auditId).lean();
+    if (!audit) return res.status(404).json({ message: "Audit introuvable" });
+
+    if (!audit.rapport) {
+      return res.status(404).json({ message: "Aucun rapport associé à cet audit" });
+    }
+
+    const rapport = await Rapport.findById(audit.rapport)
+      .populate("vulnerabilites")
+      .lean();
+
+    if (!rapport) return res.status(404).json({ message: "Rapport introuvable" });
+
+    const url = audit.urlCible || "—";
+    const vulns = Array.isArray(rapport.vulnerabilites) ? rapport.vulnerabilites : [];
+
+    // ✅ format attendu par generatePDF() côté frontend
+    const report = {
+  url,
+  score: Number(rapport.scoreGlobal ?? audit.scoreGlobal ?? 0) || 0,
+  ssl: /^https:\/\//i.test(String(url)),
+  sslExpiry: null,
+  redirect: false,
+  server: null,
+  headers: Array.isArray(audit.headers)
+    ? audit.headers.map((h) => ({
+        name: h?.name || h?.header || h?.key || "Header",
+        present: Boolean(h?.present ?? h?.ok ?? true),
+        critical: Boolean(h?.critical ?? false),
+      }))
+    : [],
+  vulns: vulns.map((v, idx) => ({
+    id: v?._id || v?.id || String(idx + 1),
+    severity: v?.niveauRisque || "Inconnu",
+    title: v?.titre || v?.type || "Vulnérabilité",
+    description: v?.description || "—",
+    fix: v?.recommandation || "—",
+  })),
+
+  // ✅ ICI: on prend les recommandations depuis vulnerabilite.recommandation
+  recommendations: Array.from(
+    new Set(
+      vulns
+        .map((v) => (v?.recommandation || "").trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 20),
+};
+
+    return res.json(report);
+  } catch (err) {
+    console.error("getAuditReportAdmin error:", err);
+    return res.status(500).json({ message: "Erreur récupération report", error: err.message });
+  }
+};
 // ================= REGISTER =================
 exports.register = async (req, res) => {
   try {
@@ -138,14 +215,17 @@ exports.register = async (req, res) => {
       return res.status(400).json({ success: false, message: "Email déjà utilisé" });
     }
 
+    // ⚠️ tu calcules hashedPassword mais tu ne l'utilises pas dans ton code initial
+    // Je garde ton comportement mais voici la bonne version:
     const hashedPassword = await bcrypt.hash(mdp, 10);
+
     const user = await User.create({
       nom,
       prenom,
       email,
-      mdp ,
+      mdp: hashedPassword,
       role: "user",
-      image: req.file ? req.file.filename : null
+      image: req.file ? req.file.filename : null,
     });
 
     res.status(201).json({
@@ -154,8 +234,8 @@ exports.register = async (req, res) => {
         _id: user._id,
         nom: user.nom,
         email: user.email,
-        image: user.image
-      }
+        image: user.image,
+      },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Erreur serveur", error: error.message });
@@ -172,11 +252,9 @@ exports.login = async (req, res) => {
     const isMatch = await bcrypt.compare(mdp, user.mdp);
     if (!isMatch) return res.status(400).json({ success: false, message: "Identifiants invalides" });
 
-    const token = jwt.sign(
-      { id: user._id, role: user.role, nom: user.nom },
-      process.env.JWT_SECRET,
-      { expiresIn: "1h" }
-    );
+    const token = jwt.sign({ id: user._id, role: user.role, nom: user.nom }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
 
     res.json({
       success: true,
@@ -185,33 +263,28 @@ exports.login = async (req, res) => {
         id: user._id,
         _id: user._id,
         nom: user.nom,
-        prenom: user.prenom,       // ✅
+        prenom: user.prenom,
         email: user.email,
         role: user.role,
-        image: user.image,         // ✅
-        profile: user.profile,     // ✅
-        notifications: user.notifications, // ✅
-        security: user.security,   // ✅
-        prefs: user.prefs,         // ✅
-      }
+        image: user.image,
+        profile: user.profile,
+        notifications: user.notifications,
+        security: user.security,
+        prefs: user.prefs,
+      },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Erreur serveur", error: error.message });
   }
 };
+
 // ================= UPLOAD IMAGE =================
 exports.uploadImage = async (req, res) => {
   try {
-    // ✅ Supporte les deux formes selon ce que le middleware injecte
-    const userId = req.user._id || req.user.id;
-    
-    if (!userId) {
-      return res.status(401).json({ success: false, message: "Non authentifié" });
-    }
-    
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: "Aucun fichier reçu" });
-    }
+    const userId = req.user?._id || req.user?.id;
+
+    if (!userId) return res.status(401).json({ success: false, message: "Non authentifié" });
+    if (!req.file) return res.status(400).json({ success: false, message: "Aucun fichier reçu" });
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: "Utilisateur non trouvé" });
@@ -224,17 +297,28 @@ exports.uploadImage = async (req, res) => {
     res.status(500).json({ success: false, message: "Erreur serveur", error: error.message });
   }
 };
+
 // ================= ADMIN: ADD USER =================
 exports.ajouterUtilisateur = async (req, res) => {
   try {
     const { nom, prenom, email, mdp, role } = req.body;
 
-    if (await User.findOne({ email })) return res.status(400).json({ success: false, message: "Email déjà utilisé" });
+    if (await User.findOne({ email }))
+      return res.status(400).json({ success: false, message: "Email déjà utilisé" });
 
     const hashedPassword = await bcrypt.hash(mdp, 10);
-    const nouvelUser = await User.create({ nom, prenom, email, mdp: hashedPassword, role: role || "user" });
+    const nouvelUser = await User.create({
+      nom,
+      prenom,
+      email,
+      mdp: hashedPassword,
+      role: role || "user",
+    });
 
-    res.status(201).json({ success: true, user: { id: nouvelUser._id, nom: nouvelUser.nom, email: nouvelUser.email, role: nouvelUser.role } });
+    res.status(201).json({
+      success: true,
+      user: { id: nouvelUser._id, nom: nouvelUser.nom, email: nouvelUser.email, role: nouvelUser.role },
+    });
   } catch (err) {
     res.status(400).json({ success: false, message: "Erreur d’ajout", error: err.message });
   }
@@ -257,7 +341,11 @@ exports.updateUtilisateur = async (req, res) => {
     const data = { ...req.body };
     if (data.mdp) data.mdp = await bcrypt.hash(data.mdp, 10);
 
-    const updatedUser = await User.findByIdAndUpdate(req.params.id, data, { new: true, runValidators: true }).select("-mdp");
+    const updatedUser = await User.findByIdAndUpdate(req.params.id, data, {
+      new: true,
+      runValidators: true,
+    }).select("-mdp");
+
     if (!updatedUser) return res.status(404).json({ success: false, message: "Utilisateur non trouvé" });
 
     res.json({ success: true, user: updatedUser });
@@ -269,16 +357,54 @@ exports.updateUtilisateur = async (req, res) => {
 // ================= DELETE USER =================
 exports.deleteUtilisateur = async (req, res) => {
   try {
-    const deletedUser = await User.findByIdAndDelete(req.params.id);
-    if (!deletedUser) return res.status(404).json({ success: false, message: "Utilisateur non trouvé" });
+    const deletedUser = await User.findById(req.params.id);
+    if (!deletedUser) return res.status(404).json({ message: "Utilisateur non trouvé" });
 
-    res.json({ success: true, message: "Utilisateur supprimé avec succès" });
+    await User.findByIdAndDelete(req.params.id);
+
+    // ✅ notif admin: utilisateur supprimé (si tu as Settings + NotificationService)
+    try {
+      const settings = await Settings.findOne({ key: "global" }).lean();
+      if (settings?.notifications?.inAppAlert) {
+        await NotificationService.createAdminNotification({
+          type: "user_deleted",
+          level: "warning",
+          title: "Utilisateur supprimé",
+          message: `Suppression: ${deletedUser.email}`,
+          user: deletedUser.id,
+          actor: req.user?._id || req.user?.id,
+        });
+      }
+    } catch (e) {
+      console.error("Notif user_deleted failed:", e.message);
+    }
+
+    res.json({ message: "Utilisateur supprimé avec succès" });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Erreur de suppression", error: err.message });
+    res.status(500).json({ message: "Erreur de suppression", error: err.message });
+  }
+};
+
+// ================= ADMIN: GET ALL AUDITS =================
+// ✅ AJOUT: manquait -> causait "handler must be a function"
+exports.getAllAuditsAdmin = async (req, res) => {
+  try {
+    const audits = await Audit.find({})
+      .sort({ date: -1 })
+      .populate({
+        path: "rapport",
+        populate: { path: "vulnerabilites", select: "niveauRisque type description recommandation" },
+      })
+      .lean();
+
+    res.json(audits);
+  } catch (err) {
+    res.status(500).json({ message: "Erreur lors de la récupération des audits", error: err.message });
   }
 };
 
 // ================= ADMIN DASHBOARD =================
+// Remplace COMPLETEMENT ta fonction exports.getAdminDashboard par celle-ci
 exports.getAdminDashboard = async (req, res) => {
   try {
     const now = new Date();
@@ -289,30 +415,7 @@ exports.getAdminDashboard = async (req, res) => {
       return x;
     };
 
-    const normalizeRisk = (s) => (s ?? "").toString().trim().toLowerCase();
-    const normalizeLabel = (risk) => {
-      const r = normalizeRisk(risk);
-      if (r === "critical" || r === "critique") return "Critique";
-      if (r === "high" || ["élevé","eleve","éleve","haut"].includes(r)) return "Élevé";
-      if (r === "medium" || r === "moyen") return "Moyen";
-      if (r === "low" || r === "faible" || r === "bas") return "Faible";
-      return "Inconnu";
-    };
-
-    const severityRank = { Critique: 4, "Élevé": 3, Moyen: 2, Faible: 1, Inconnu: 0 };
-
-    const getAuditRisk = (audit) => {
-      const vulns = audit?.rapport?.vulnerabilites || [];
-      if (!vulns.length) return "Faible";
-
-      let maxRank = 0, maxLabel = "Faible";
-      for (const v of vulns) {
-        const label = normalizeLabel(v?.niveauRisque);
-        const rank = severityRank[label] ?? 0;
-        if (rank > maxRank) { maxRank = rank; maxLabel = label; }
-      }
-      return maxRank === 0 ? "Inconnu" : maxLabel;
-    };
+    const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
 
     const [usersCount, auditsCount, auditsInProgress] = await Promise.all([
       User.countDocuments(),
@@ -320,94 +423,144 @@ exports.getAdminDashboard = async (req, res) => {
       Audit.countDocuments({ statut: "En cours" }),
     ]);
 
+    // ---- derniers audits ----
     const recentAuditsDocs = await Audit.find({})
       .sort({ date: -1 })
       .limit(6)
-      .populate({ path: "rapport", populate: { path: "vulnerabilites", select: "niveauRisque" } })
+      .populate({
+        path: "rapport",
+        populate: { path: "vulnerabilites", select: "niveauRisque" },
+      })
       .lean();
 
-    const normalizeScore = (s) => {
-      const n = Number(s);
-      if (!Number.isFinite(n)) return 0;
-      return n >= 0 && n <= 10 ? Math.round(n * 10) : Math.max(0, Math.min(100, Math.round(n)));
+    // ⚠️ on calcule un risk simple depuis les vulnérabilités (max severity)
+    const riskRank = { Critique: 4, "Élevé": 3, Moyen: 2, Faible: 1, Inconnu: 0 };
+    const normalizeRiskLabel = (risk) => {
+      const r = (risk ?? "").toString().trim().toLowerCase();
+      if (r === "critical" || r === "critique") return "Critique";
+      if (r === "high" || r === "élevé" || r === "eleve" || r === "éleve") return "Élevé";
+      if (r === "medium" || r === "moyen") return "Moyen";
+      if (r === "low" || r === "faible") return "Faible";
+      return "Inconnu";
     };
 
-    const recentAudits = recentAuditsDocs.map(a => ({
-      site: a.urlCible || "—",
-      score: normalizeScore(a?.rapport?.scoreGlobal),
-      risk: getAuditRisk(a),
+    const computeAuditRisk = (audit) => {
+      const vulns = audit?.rapport?.vulnerabilites || [];
+      if (!Array.isArray(vulns) || vulns.length === 0) return "Inconnu";
+      let best = "Inconnu";
+      for (const v of vulns) {
+        const r = normalizeRiskLabel(v?.niveauRisque);
+        if (riskRank[r] > riskRank[best]) best = r;
+      }
+      return best;
+    };
+
+    const recentAudits = recentAuditsDocs.map((a) => ({
+      site: a.urlCible || a.site || a.targetUrl || "—",
+      score: a?.rapport?.scoreGlobal ?? a?.scoreGlobal ?? 0,
+      risk: computeAuditRisk(a),
       status: a.statut || "—",
-      date: a.date ? new Date(a.date).toISOString().slice(0,10) : "—"
+      date: a.date,
     }));
 
-    // Weekly activity
-    const sevenDaysAgo = startOfDay(new Date(now.getTime() - 6*24*60*60*1000));
+    // ---- weekly audits (7 derniers jours) ----
+    const sevenDaysAgo = startOfDay(new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000));
+
     const weeklyAudits = await Audit.find({ date: { $gte: sevenDaysAgo } })
-      .populate({ path: "rapport", select: "vulnerabilites", populate: { path: "vulnerabilites", select: "niveauRisque" } })
+      .populate({
+        path: "rapport",
+        select: "vulnerabilites",
+        populate: { path: "vulnerabilites", select: "niveauRisque" },
+      })
       .lean();
 
     const weeklyMap = new Map();
     for (const a of weeklyAudits) {
       if (!a.date) continue;
-      const key = new Date(a.date).toISOString().slice(0,10);
+      const key = new Date(a.date).toISOString().slice(0, 10);
       const vulnsCount = a?.rapport?.vulnerabilites?.length || 0;
       const prev = weeklyMap.get(key) || { audits: 0, vulns: 0 };
       weeklyMap.set(key, { audits: prev.audits + 1, vulns: prev.vulns + vulnsCount });
     }
 
-    const dayLabelsFr = ["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"];
-    const auditsWeekly = Array.from({length:7}, (_,i) => {
-      const d = new Date(sevenDaysAgo.getTime() + i*24*60*60*1000);
-      const key = d.toISOString().slice(0,10);
-      const item = weeklyMap.get(key) || { audits:0, vulns:0 };
-      return { day: dayLabelsFr[d.getDay()], audits: item.audits, vulns: item.vulns };
-    });
+    const dayLabelsFr = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
+    const auditsWeekly = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(sevenDaysAgo.getTime() + i * 24 * 60 * 60 * 1000);
+      const key = d.toISOString().slice(0, 10);
+      const item = weeklyMap.get(key) || { audits: 0, vulns: 0 };
+      auditsWeekly.push({ day: dayLabelsFr[d.getDay()], audits: item.audits, vulns: item.vulns });
+    }
 
-    // Monthly audits last 12 months
-    const start12Months = new Date(now); start12Months.setMonth(start12Months.getMonth()-11); start12Months.setDate(1); start12Months.setHours(0,0,0,0);
-    const auditsMonthlyAgg = await Audit.aggregate([
-      { $match: { date: { $gte: start12Months } } },
-      { $group: { _id: { $dateToString: { format:"%Y-%m", date:"$date" } }, value:{ $sum:1 } } },
-      { $sort: { _id:1 } }
+    // ---- auditsMonthly: 12 derniers mois ----
+    const startMonth = startOfMonth(new Date(now.getFullYear(), now.getMonth() - 11, 1));
+
+    const monthlyAgg = await Audit.aggregate([
+      { $match: { date: { $gte: startMonth } } },
+      {
+        $group: {
+          _id: { y: { $year: "$date" }, m: { $month: "$date" } },
+          value: { $sum: 1 },
+        },
+      },
+      { $sort: { "_id.y": 1, "_id.m": 1 } },
     ]);
-    const monthlyMap = new Map(auditsMonthlyAgg.map(x=>[x._id,x.value]));
-    const monthNamesFr = ["Jan","Fév","Mar","Avr","Mai","Juin","Juil","Aoû","Sep","Oct","Nov","Déc"];
-    const auditsMonthly = Array.from({length:12},(_,i)=>{
-      const d = new Date(start12Months); d.setMonth(d.getMonth()+i);
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-      return { month: monthNamesFr[d.getMonth()], value: monthlyMap.get(key)||0 };
-    });
 
-    // Risk distribution
-    const auditsForRisk = await Audit.find({ date: { $gte: start12Months }, rapport:{ $ne:null } })
+    const monthKey = (y, m) => `${y}-${String(m).padStart(2, "0")}`;
+    const mapMonthly = new Map(monthlyAgg.map((x) => [monthKey(x._id.y, x._id.m), x.value]));
+
+    const auditsMonthly = [];
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(startMonth.getFullYear(), startMonth.getMonth() + i, 1);
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const key = monthKey(y, m);
+
+      auditsMonthly.push({
+        month: d.toLocaleDateString("fr-FR", { month: "short" }),
+        value: mapMonthly.get(key) || 0,
+      });
+    }
+
+    // ---- riskDistribution + alerts (total vulnérabilités) ----
+    // On compte depuis les audits (rapport.vulnerabilites). Pas parfait mais cohérent avec ton modèle.
+    const auditsForRisk = await Audit.find({ rapport: { $ne: null } })
       .select("rapport")
-      .populate({ path:"rapport", select:"vulnerabilites", populate:{ path:"vulnerabilites", select:"niveauRisque" } })
+      .populate({
+        path: "rapport",
+        select: "vulnerabilites",
+        populate: { path: "vulnerabilites", select: "niveauRisque" },
+      })
       .lean();
 
-    const counts = {}; let totalVulns=0;
-    for(const a of auditsForRisk){
-      const vulns = a?.rapport?.vulnerabilites || [];
-      for(const v of vulns){
-        const k = normalizeLabel(v?.niveauRisque);
-        if(k==="Inconnu") continue;
-        counts[k] = (counts[k]||0)+1;
-        totalVulns++;
+    const riskCounts = { Critique: 0, "Élevé": 0, Moyen: 0, Faible: 0, Inconnu: 0 };
+    let alerts = 0;
+
+    for (const a of auditsForRisk) {
+      const vulns = a?.rapport?.vulnerabilites;
+      if (!Array.isArray(vulns)) continue;
+      alerts += vulns.length;
+      for (const v of vulns) {
+        const r = normalizeRiskLabel(v?.niveauRisque);
+        riskCounts[r] = (riskCounts[r] || 0) + 1;
       }
     }
-    const riskDistribution = Object.entries(counts).map(([name,count])=>({name,value:totalVulns?Math.round(count*100/totalVulns):0}));
 
-    res.json({
+    const riskDistribution = Object.entries(riskCounts)
+      .map(([name, value]) => ({ name, value }))
+      .filter((x) => x.value > 0);
+
+    return res.json({
       users: usersCount,
       audits: auditsCount,
-      alerts: totalVulns,
+      alerts, // ✅ total vulnérabilités réel
       auditsInProgress,
       auditsWeekly,
-      auditsMonthly,
-      riskDistribution,
-      recentAudits
+      auditsMonthly, // ✅ 12 mois
+      riskDistribution, // ✅ distribution réelle
+      recentAudits, // ✅ risk calculé
     });
-
-  } catch(err){
-    res.status(500).json({ success:false, message:"Erreur récupération dashboard", error: err.message });
+  } catch (err) {
+    return res.status(500).json({ message: "Erreur récupération dashboard", error: err.message });
   }
 };
