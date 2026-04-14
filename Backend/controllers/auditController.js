@@ -141,7 +141,8 @@ exports.completeAudit = async (req, res) => {
    // ✅ 3) envoyer email à l'admin si activé dans AdminSettings
 try {
   const adminSettings = await AdminSettings.findOne().select("notifications");
-  const enabled = adminSettings?.notifications?.auditEmailToAdmin;
+  const enabled =
+  adminSettings?.notifications?.auditEmailToAdmin === true;
 
   if (enabled) {
     const adminEmail = process.env.ADMIN_EMAIL;

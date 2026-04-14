@@ -14,6 +14,7 @@ const SettingsSchema = new mongoose.Schema(
     notifications: {
       // ✅ uniquement in-app
       inAppAlert: { type: Boolean, default: true },
+      auditEmailToAdmin: { type: Boolean, default: false },
     },
 
     security: {
