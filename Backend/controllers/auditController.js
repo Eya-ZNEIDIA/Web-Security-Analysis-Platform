@@ -142,7 +142,7 @@ exports.completeAudit = async (req, res) => {
 try {
   const adminSettings = await AdminSettings.findOne().select("notifications");
   const enabled =
-  adminSettings?.notifications?.auditEmailToAdmin === true;
+  adminSettings?.notifications?.auditEmailToAdmin !== false ;
 
   if (enabled) {
     const adminEmail = process.env.ADMIN_EMAIL;
