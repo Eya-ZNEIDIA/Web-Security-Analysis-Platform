@@ -31,6 +31,19 @@ router.get("/unread", protect, async (req, res) => {
   }
 });
 
+// ✅ Marquer TOUTES les alertes comme lues
+router.put("/mark-all-read", protect, async (req, res) => {
+  try {
+    const result = await Alert.updateMany(
+      { userId: req.user.id, read: false },
+      { $set: { read: true } }
+    );
+    res.json({ message: "Toutes les alertes marquées comme lues", modified: result.modifiedCount });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ✅ Marquer une alerte comme lue
 router.put("/:id/read", protect, async (req, res) => {
   try {

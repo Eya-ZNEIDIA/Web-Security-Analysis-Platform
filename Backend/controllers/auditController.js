@@ -3,6 +3,12 @@ const URL = require("../models/Url");
 const User = require("../models/User");
 const sendEmail = require("../utils/sendEmail");
 const AdminSettings =require("../models/AdminSettings");
+const { validateUrl } = require("../utils/urlValidator");
+
+/**
+ * 🔒 POST /api/audits
+ * Crée un nouvel audit avec validation d'URL sécurisée
+ */
 exports.createAudit = async (req, res) => {
   try {
     const { adresse } = req.body;
@@ -12,7 +18,20 @@ exports.createAudit = async (req, res) => {
       return res.status(401).json({ message: "Utilisateur non authentifié" });
     }
 
-    const url = await URL.create({ adresse });
+    // ✅ Validation côté backend - Vérification stricte de l'URL
+    const validation = validateUrl(adresse);
+    
+    if (!validation.isValid) {
+      return res.status(400).json({ 
+        message: validation.error || "Veuillez entrer une URL valide",
+        code: "INVALID_URL"
+      });
+    }
+
+    // Utiliser l'URL normalisée et validée
+    const cleanUrl = validation.cleanUrl;
+
+    const url = await URL.create({ adresse: cleanUrl });
 
     const audit = await Audit.create({
       userId: req.user.id,

@@ -5,15 +5,23 @@ const { protect, authorizeRoles } = require("../middlewares/authMiddleware");
 const Notification = require("../models/Notification");
 
 router.get("/admin/notifications", protect, authorizeRoles(["admin"]), async (req, res) => {
-  const items = await Notification.find({ targetRole: "admin" })
+  // Only return unread notifications for dashboard
+  const items = await Notification.find({ targetRole: "admin", read: false })
     .sort({ createdAt: -1 })
     .limit(50)
     .lean();
 
-  const unreadCount = items.filter((n) => !n.read).length;
-
-  res.json({ notifications: items, unreadCount });
+  res.json({ notifications: items, unreadCount: items.length });
 });
+
+router.put("/admin/notifications/mark-all-read", protect, authorizeRoles(["admin"]), async (req, res) => {
+  const result = await Notification.updateMany(
+    { targetRole: "admin", read: false },
+    { $set: { read: true } }
+  );
+  res.json({ message: "Toutes les notifications marquées comme lues", modified: result.modifiedCount });
+});
+
 router.put("/admin/notifications/:id/read", protect, authorizeRoles(["admin"]), async (req, res) => {
   const notif = await Notification.findOneAndUpdate(
     { _id: req.params.id, targetRole: "admin" },
