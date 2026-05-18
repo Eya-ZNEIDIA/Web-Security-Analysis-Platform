@@ -58,33 +58,61 @@ const getStats = async (req, res) => {
   }
 };
 
+// Reject ObjectIds, UUIDs, bare hashes — only keep real URLs/domains
+const isValidUrl = (v) => {
+  const s = String(v || "").trim();
+  if (!s) return false;
+  if (/^[a-f0-9]{24}$/i.test(s)) return false;                     // MongoDB ObjectId
+  if (/^[a-f0-9]{32}$/i.test(s)) return false;                     // MD5 hash
+  if (/^[a-f0-9-]{36}$/i.test(s)) return false;                    // UUID
+  if (/^[a-f0-9]{40,}$/i.test(s)) return false;                    // SHA hash
+  if (!/[a-zA-Z]/.test(s)) return false;                           // must contain at least one letter
+  if (!/\./.test(s.replace(/^https?:\/\//i, ""))) return false;   // must have a dot (domain)
+  return true;
+};
+
 // GET /api/dashboard/recent-scans
 const getRecentScans = async (req, res) => {
   try {
     const userId = req.user.id;
 
+    // Fetch last 50 audits, filter valid URLs, dedup by hostname
     const audits = await Audit.find({ userId })
       .sort({ date: -1 })
-      .limit(10)
-      .select("urlCible statut date scoreGlobal");
+      .limit(50)
+      .select("urlCible statut date scoreGlobal")
+      .lean();
 
-    const formatted = audits.map(a => ({
+    const seen = new Map();
+    for (const a of audits) {
+      if (!isValidUrl(a.urlCible)) continue;
+      const host = String(a.urlCible).replace(/^https?:\/\//i, "").replace(/\/+$/, "").toLowerCase();
+      if (!host || seen.has(host)) continue;
+      seen.set(host, a);
+    }
+
+    const deduped = Array.from(seen.values()).slice(0, 8);
+
+    const normStatus = (s, score) => {
+      if (s === "En cours") return "En cours";
+      if (score >= 75) return "S\u00e9curis\u00e9";
+      if (score >= 50) return "Risque mod\u00e9r\u00e9";
+      return "Critique";
+    };
+
+    const formatted = deduped.map(a => ({
       _id: a._id,
-      url: a.urlCible || "N/A",
+      url: a.urlCible,
       statut: a.statut,
+      status: normStatus(a.statut, a.scoreGlobal || 0),
       score: a.scoreGlobal || 0,
       date: a.date ? a.date.toISOString().split("T")[0] : "N/A",
     }));
 
-    console.log("📋 Recent Scans:", formatted.length);
-
     res.json(formatted);
   } catch (error) {
-    console.error("❌ Recent Scans Error:", error);
-    res.status(500).json({ 
-      message: "Erreur recent scans", 
-      error: error.message 
-    });
+    console.error("\u274c Recent Scans Error:", error);
+    res.status(500).json({ message: "Erreur recent scans", error: error.message });
   }
 };
 
@@ -92,29 +120,45 @@ const getRecentScans = async (req, res) => {
 const getAlerts = async (req, res) => {
   try {
     const userId = req.user.id;
+    const limit = Math.min(Number(req.query.limit) || 10, 50);
 
-    const alerts = await Alert.find({ userId })
+    // Only return UNREAD alerts for the dashboard
+    const alerts = await Alert.find({ userId, read: false })
       .sort({ createdAt: -1 })
-      .limit(10)
-      .select("message level title createdAt read");
+      .limit(limit)
+      .populate("vulnerabiliteId", "type endpoint niveauRisque severity")
+      .lean();
 
-    const formatted = alerts.map(a => ({
-      _id: a._id,
-      message: a.message || a.title,
-      level: a.level,
-      createdAt: a.createdAt,
-      read: a.read
-    }));
+    const normSev = (s) => {
+      const r = String(s || "").toLowerCase();
+      if (r === "critical" || r === "critique") return "Critique";
+      if (r === "high" || r === "\u00e9lev\u00e9" || r === "eleve") return "\u00c9lev\u00e9";
+      if (r === "medium" || r === "moyen") return "Moyen";
+      if (r === "low" || r === "faible") return "Faible";
+      return "Info";
+    };
 
-    console.log("🚨 Alerts:", formatted.length);
+    const total = await Alert.countDocuments({ userId, read: false });
 
-    res.json(formatted);
+    const formatted = alerts.map(a => {
+      const vuln = a.vulnerabiliteId || {};
+      return {
+        _id: a._id,
+        title: a.title || vuln.type || "Alerte",
+        message: a.message || "",
+        level: normSev(a.level),
+        severity: normSev(a.level),
+        endpoint: vuln.endpoint || a.urlCible || "",
+        type: vuln.type || a.title || "Alerte",
+        createdAt: a.createdAt,
+        read: a.read,
+      };
+    });
+
+    res.json({ alerts: formatted, total, hasMore: total > limit });
   } catch (error) {
     console.error("❌ Alerts Error:", error);
-    res.status(500).json({ 
-      message: "Erreur alerts", 
-      error: error.message 
-    });
+    res.status(500).json({ message: "Erreur alerts", error: error.message });
   }
 };
 

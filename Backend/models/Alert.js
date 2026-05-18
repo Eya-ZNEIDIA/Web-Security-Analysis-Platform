@@ -18,7 +18,7 @@ const alertSchema = new Schema({
   },
   level: {
     type: String,
-    enum: ["Critique", "Élevé", "Moyen", "Faible"],
+    enum: ["Critique", "critical", "Élevé", "high", "Moyen", "medium", "Faible", "low"],
     required: true
   },
   message: String,

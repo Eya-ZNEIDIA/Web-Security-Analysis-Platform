@@ -167,38 +167,87 @@ exports.getAuditReportAdmin = async (req, res) => {
     const url = audit.urlCible || "—";
     const vulns = Array.isArray(rapport.vulnerabilites) ? rapport.vulnerabilites : [];
 
-    // ✅ format attendu par generatePDF() côté frontend
-    const report = {
-  url,
-  score: Number(rapport.scoreGlobal ?? audit.scoreGlobal ?? 0) || 0,
-  ssl: /^https:\/\//i.test(String(url)),
-  sslExpiry: null,
-  redirect: false,
-  server: null,
-  headers: Array.isArray(audit.headers)
-    ? audit.headers.map((h) => ({
-        name: h?.name || h?.header || h?.key || "Header",
-        present: Boolean(h?.present ?? h?.ok ?? true),
-        critical: Boolean(h?.critical ?? false),
-      }))
-    : [],
-  vulns: vulns.map((v, idx) => ({
-    id: v?._id || v?.id || String(idx + 1),
-    severity: v?.niveauRisque || "Inconnu",
-    title: v?.titre || v?.type || "Vulnérabilité",
-    description: v?.description || "—",
-    fix: v?.recommandation || "—",
-  })),
+    const normalizeSeverity = (s) => {
+      const r = String(s || "").trim().toLowerCase();
+      if (r === "critical" || r === "critique") return "Critique";
+      if (r === "high" || r === "élevé" || r === "eleve" || r === "éleve") return "Élevé";
+      if (r === "medium" || r === "moyen") return "Moyen";
+      if (r === "low" || r === "faible") return "Faible";
+      if (r === "info" || r === "information") return "Info";
+      return "Inconnu";
+    };
 
-  // ✅ ICI: on prend les recommandations depuis vulnerabilite.recommandation
-  recommendations: Array.from(
-    new Set(
-      vulns
-        .map((v) => (v?.recommandation || "").trim())
-        .filter(Boolean)
-    )
-  ).slice(0, 20),
-};
+    const report = {
+      _id: rapport._id,
+      reportId: rapport._id,
+      url,
+      generatedAt: audit.date,
+      score: Number(rapport.scoreGlobal ?? audit.scoreGlobal ?? 0) || 0,
+      ssl: /^https:\/\//i.test(String(url)),
+      sslExpiry: "N/A",
+      redirect: true,
+      server: audit.server || "Unknown",
+      headers: Array.isArray(audit.headers)
+        ? audit.headers.map((h) => ({
+            name: h?.name || h?.header || h?.key || "Header",
+            present: Boolean(h?.present ?? h?.ok ?? true),
+            critical: Boolean(h?.critical ?? false),
+          }))
+        : [],
+      vulns: vulns.map((v, idx) => ({
+        id: v?._id ? `V-${String(idx + 1).padStart(3, "0")}` : String(idx + 1),
+        severity: normalizeSeverity(v?.severity || v?.niveauRisque),
+        title: v?.type || v?.titre || "Vulnérabilité",
+        description: v?.description || v?.technical_details || "—",
+        endpoint: v?.endpoint || "",
+        method: v?.method || "GET",
+        parameter: v?.parameter || "",
+        payload: v?.payload || "",
+        encoding: v?.encoding || "raw",
+        evidence: v?.evidence || "",
+        impact: v?.business_impact || v?.impact || "",
+        reproduction_steps: Array.isArray(v?.reproduction_steps) ? v.reproduction_steps : [],
+        recommendation: v?.fix_recommendation || v?.recommandation || "—",
+        owasp: v?.owasp_category || "",
+        cwe: v?.cwe || "",
+        cvss_score: Number(v?.cvss_score) || 0,
+        cvss_vector: v?.cvss_vector || "",
+        technique: v?.technique || "",
+        technical_details: v?.technical_details || "",
+        business_impact: v?.business_impact || "",
+        code_example: v?.secure_code_example || v?.secure_fix_example || "",
+        headers_to_add: v?.headers_to_add || {},
+        ai_confidence: typeof v?.ai_confidence === "number" ? v.ai_confidence : null,
+        detection_source: v?.detection_source || "rule",
+        is_true_positive: v?.is_true_positive !== false,
+        response_status: v?.response_status || null,
+        http_response_snippet: v?.http_response_snippet || "",
+      })),
+      recommendations: Array.from(
+        new Set(
+          vulns
+            .map((v) => (v?.fix_recommendation || v?.recommandation || "").trim())
+            .filter(Boolean)
+        )
+      ).slice(0, 20),
+      // ─── Rapport IA enrichi ─────────────────────
+      reportMeta: {
+        durationMs: rapport.durationMs || 0,
+        ai_model: rapport.ai_model || "",
+        ai_prompt_version: rapport.ai_prompt_version || "",
+        executive_summary: rapport.executive_summary || "",
+        risk_breakdown: rapport.risk_breakdown || { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+        statistics: rapport.statistics || {},
+        endpoints_tested: rapport.endpoints_tested || [],
+        families_tested: rapport.families_tested || [],
+        timeline: (rapport.timeline || []).map((t) => ({
+          ts: t.ts,
+          phase: t.phase,
+          level: t.level,
+          message: t.message,
+        })),
+      },
+    };
 
     return res.json(report);
   } catch (err) {
@@ -244,7 +293,7 @@ exports.register = async (req, res) => {
 
 // ================= LOGIN =================
 exports.login = async (req, res) => {
-  const { email, mdp } = req.body;
+  const { email, mdp, rememberMe } = req.body;
   try {
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ success: false, message: "Identifiants invalides" });
@@ -252,8 +301,9 @@ exports.login = async (req, res) => {
     const isMatch = await bcrypt.compare(mdp, user.mdp);
     if (!isMatch) return res.status(400).json({ success: false, message: "Identifiants invalides" });
 
+    const tokenDuration = rememberMe ? "7d" : "1h";
     const token = jwt.sign({ id: user._id, role: user.role, nom: user.nom }, process.env.JWT_SECRET, {
-      expiresIn: "1h",
+      expiresIn: tokenDuration,
     });
 
     res.json({
@@ -393,7 +443,11 @@ exports.getAllAuditsAdmin = async (req, res) => {
       .sort({ date: -1 })
       .populate({
         path: "rapport",
-        populate: { path: "vulnerabilites", select: "niveauRisque type description recommandation" },
+        populate: {
+          path: "vulnerabilites",
+          select:
+            "niveauRisque severity type description recommandation fix_recommendation endpoint method parameter payload evidence cvss_score owasp_category cwe business_impact reproduction_steps secure_code_example ai_confidence detection_source is_true_positive response_status http_response_snippet",
+        },
       })
       .lean();
 
@@ -404,7 +458,19 @@ exports.getAllAuditsAdmin = async (req, res) => {
 };
 
 // ================= ADMIN DASHBOARD =================
-// Remplace COMPLETEMENT ta fonction exports.getAdminDashboard par celle-ci
+// Reject ObjectIds, UUIDs, bare hashes — only keep real URLs/domains
+const _isValidUrl = (v) => {
+  const s = String(v || "").trim();
+  if (!s || s === "—") return false;
+  if (/^[a-f0-9]{24}$/i.test(s)) return false;
+  if (/^[a-f0-9]{32}$/i.test(s)) return false;
+  if (/^[a-f0-9-]{36}$/i.test(s)) return false;
+  if (/^[a-f0-9]{40,}$/i.test(s)) return false;
+  if (!/[a-zA-Z]/.test(s)) return false;
+  if (!/\./.test(s.replace(/^https?:\/\//i, ""))) return false;
+  return true;
+};
+
 exports.getAdminDashboard = async (req, res) => {
   try {
     const now = new Date();
@@ -423,10 +489,10 @@ exports.getAdminDashboard = async (req, res) => {
       Audit.countDocuments({ statut: "En cours" }),
     ]);
 
-    // ---- derniers audits ----
+    // ---- derniers audits (fetch more, filter valid URLs, dedup) ----
     const recentAuditsDocs = await Audit.find({})
       .sort({ date: -1 })
-      .limit(6)
+      .limit(30)
       .populate({
         path: "rapport",
         populate: { path: "vulnerabilites", select: "niveauRisque" },
@@ -455,7 +521,18 @@ exports.getAdminDashboard = async (req, res) => {
       return best;
     };
 
-    const recentAudits = recentAuditsDocs.map((a) => ({
+    // Filter valid URLs and dedup by hostname
+    const seen = new Map();
+    for (const a of recentAuditsDocs) {
+      const rawUrl = a.urlCible || a.site || a.targetUrl || "";
+      if (!_isValidUrl(rawUrl)) continue;
+      const host = rawUrl.replace(/^https?:\/\//i, "").replace(/\/+$/, "").toLowerCase();
+      if (seen.has(host)) continue;
+      seen.set(host, a);
+    }
+    const dedupedRecent = Array.from(seen.values()).slice(0, 8);
+
+    const recentAudits = dedupedRecent.map((a) => ({
       site: a.urlCible || a.site || a.targetUrl || "—",
       score: a?.rapport?.scoreGlobal ?? a?.scoreGlobal ?? 0,
       risk: computeAuditRisk(a),
