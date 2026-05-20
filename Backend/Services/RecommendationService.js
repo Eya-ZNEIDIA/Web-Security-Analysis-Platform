@@ -25,7 +25,7 @@
 const { Ollama } = require("ollama");
 
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "ollama";
 const ollama = new Ollama({ host: OLLAMA_HOST });
 
 const cache = new Map();

@@ -12,6 +12,7 @@ const Alert = require("./models/Alert");
 const settingsRoutes = require("./routes/settingsRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");  
 const adminSettingsRoutes = require("./routes/adminSettingsRoutes");
+const chatRoutes = require("./routes/chatRoutes");
 
 dotenv.config();
 
@@ -53,6 +54,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/alerts", require("./routes/alertRoutes"));
+app.use("/api/chat", chatRoutes);
 app.use("/api", settingsRoutes);
 app.use("/api", notificationRoutes);
 app.use("/api/admin/settings", adminSettingsRoutes);

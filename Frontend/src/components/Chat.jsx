@@ -29,7 +29,7 @@ const Chat = () => {
   
   // UI State
   const [showSidebar, setShowSidebar] = useState(true);
-  const [selectedModel, setSelectedModel] = useState('mistral');
+  const [selectedModel, setSelectedModel] = useState('ollama');
   const [availableModels, setAvailableModels] = useState([]);
   const [error, setError] = useState('');
   const [ollamaStatus, setOllamaStatus] = useState('checking');
@@ -88,7 +88,7 @@ const Chat = () => {
       if (res.ok) {
         const data = await res.json();
         setAvailableModels(data.models || []);
-        setSelectedModel(data.models?.[0] || 'mistral');
+        setSelectedModel(data.models?.[0] || 'ollama');
         setOllamaStatus('connected');
         setError('');
       } else {
@@ -345,7 +345,7 @@ const Chat = () => {
             className="w-full mt-1 bg-white text-gray-900 text-sm px-2 py-1 rounded border border-gray-300 focus:border-green-500 focus:outline-none"
           >
             {availableModels.length === 0 ? (
-              <option value="mistral">mistral (par défaut)</option>
+              <option value="ollama">ollama (par défaut)</option>
             ) : (
               availableModels.map((model) => (
                 <option key={model} value={model}>
