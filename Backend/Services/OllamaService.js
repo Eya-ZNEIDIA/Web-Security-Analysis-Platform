@@ -51,11 +51,12 @@ class OllamaService {
     prompt,
     conversationHistory = [],
     model = this.defaultModel,
-    onToken = null
+    onToken = null,
+    systemPrompt = null
   ) {
     try {
       // Construire le prompt complet avec contexte
-      const messages = this._buildMessages(prompt, conversationHistory);
+      const messages = this._buildMessages(prompt, conversationHistory, systemPrompt);
       
       let fullResponse = '';
       let errorOccurred = null;
@@ -211,13 +212,13 @@ class OllamaService {
   /**
    * Construit les messages pour l'API chat d'Ollama
    */
-  _buildMessages(prompt, conversationHistory) {
+  _buildMessages(prompt, conversationHistory, systemPrompt = null) {
     const messages = [];
     
-    // Ajouter le prompt système
+    // Ajouter le prompt système (override si fourni)
     messages.push({
       role: 'system',
-      content: this._buildSystemPrompt()
+      content: systemPrompt || this._buildSystemPrompt()
     });
     
     // Ajouter l'historique de conversation

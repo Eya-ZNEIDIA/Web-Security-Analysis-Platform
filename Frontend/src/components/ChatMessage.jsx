@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Copy, Check, Code } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
@@ -68,17 +69,25 @@ const ChatMessage = ({ message, isStreaming }) => {
 
     table({ children }) {
       return (
-        <div className="overflow-x-auto my-4">
-          <table className="w-full border-collapse border border-gray-300">
+        <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 shadow-sm">
+          <table className="w-full border-collapse text-sm">
             {children}
           </table>
         </div>
       );
     },
 
+    thead({ children }) {
+      return (
+        <thead className="bg-green-600 text-white">
+          {children}
+        </thead>
+      );
+    },
+
     th({ children }) {
       return (
-        <th className="border border-gray-300 bg-gray-100 px-4 py-2 text-left text-gray-800 font-semibold">
+        <th className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider">
           {children}
         </th>
       );
@@ -86,9 +95,17 @@ const ChatMessage = ({ message, isStreaming }) => {
 
     td({ children }) {
       return (
-        <td className="border border-gray-300 px-4 py-2 text-gray-700">
+        <td className="px-4 py-2 text-gray-700 border-t border-gray-100 whitespace-nowrap">
           {children}
         </td>
+      );
+    },
+
+    tr({ children, ...props }) {
+      return (
+        <tr className="hover:bg-green-50 transition-colors even:bg-gray-50">
+          {children}
+        </tr>
       );
     },
 
@@ -183,17 +200,17 @@ const ChatMessage = ({ message, isStreaming }) => {
       )}
 
       <div
-        className={`max-w-2xl rounded-lg px-4 py-3 shadow-sm ${
+        className={`rounded-lg px-4 py-3 shadow-sm ${
           isUser
-            ? 'bg-green-600 text-white'
-            : 'bg-white text-gray-800 border border-gray-200'
+            ? 'max-w-2xl bg-green-600 text-white'
+            : 'max-w-3xl bg-white text-gray-800 border border-gray-200'
         }`}
       >
         {isUser ? (
           <p className="text-sm">{message.content}</p>
         ) : (
           <div className="prose prose-sm max-w-none">
-            <ReactMarkdown components={components}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
               {message.content}
             </ReactMarkdown>
           </div>
