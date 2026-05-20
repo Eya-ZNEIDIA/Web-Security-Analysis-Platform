@@ -2,8 +2,218 @@
 
 const ChatConversation = require('../models/Chat'); // Assurez-vous que le chemin est correct
 const Audit = require('../models/Audit');
+const Vulnerabilite = require('../models/Vulnerabilite');
 const AIChatService = require('../services/AIChatService');
 const OllamaService = require('../services/OllamaService');
+
+// ─── Audit context detection ───────────────────────────────────────────────────
+
+const AUDIT_KEYWORDS = [
+  'audit', 'scan', 'vulnerability', 'vulnerabilit', 'vulnérabilit',
+  'xss', 'sql injection', 'sqli', 'csrf', 'ssrf', 'rce',
+  'injection', 'cross-site', 'header', 'cookie', 'session',
+  'owasp', 'cwe', 'cvss', 'endpoint', 'payload',
+  'critical', 'high', 'medium', 'low',
+  'rapport', 'report', 'score', 'risque', 'risk',
+  'sécurité', 'security', 'faille', 'breach'
+];
+
+/**
+ * Detects if a user message is asking about their audit data
+ */
+function isAuditRelatedQuery(message) {
+  const lower = message.toLowerCase();
+  return AUDIT_KEYWORDS.some(keyword => lower.includes(keyword));
+}
+
+/**
+ * Fetches relevant audit context for the user based on their message.
+ * When a specific vuln type is mentioned (e.g. IDOR, XSS), searches
+ * ALL user vulnerabilities first, then resolves the related audits.
+ */
+async function fetchAuditContext(userId, message) {
+  const lower = message.toLowerCase();
+
+  // If the user mentions a specific vulnerability type, search vulns first across ALL audits
+  const vulnTypes = ['xss', 'sql injection', 'sqli', 'csrf', 'ssrf', 'rce', 'injection', 'open redirect', 'idor'];
+  const mentionedType = vulnTypes.find(t => lower.includes(t));
+
+  if (mentionedType) {
+    // Strategy: search vulnerabilities directly, then resolve audits
+    console.log(`[AuditContext] Specific type "${mentionedType}" detected for userId: ${userId}, searching all user vulns...`);
+
+    // Get ALL audit IDs for this user
+    const userAuditIds = await Audit.find({ userId }).distinct('_id');
+    if (!userAuditIds || userAuditIds.length === 0) return null;
+
+    const typeRegex = new RegExp(mentionedType, 'i');
+    const vulnFilter = {
+      auditId: { $in: userAuditIds },
+      $or: [
+        { type: typeRegex },
+        { technique: typeRegex },
+        { owasp_category: typeRegex },
+        { description: typeRegex },
+        { category: typeRegex }
+      ]
+    };
+
+    const vulnerabilities = await Vulnerabilite.find(vulnFilter)
+      .sort({ detected_at: -1 })
+      .limit(20)
+      .lean();
+
+    console.log(`[AuditContext] Found ${vulnerabilities.length} "${mentionedType}" vulnerabilities across ${userAuditIds.length} audits`);
+
+    if (vulnerabilities.length === 0) {
+      // No vulns of this type — still return audit summary so bot can say "none found"
+      const recentAudits = await Audit.find({ userId }).sort({ date: -1 }).limit(5).lean();
+      return {
+        audits: recentAudits.map(a => ({
+          id: a._id.toString(), url: a.urlCible, date: a.date,
+          score: a.scoreGlobal, status: a.statut,
+          totalVulnerabilities: a.totalVulnerabilities, intensity: a.intensity
+        })),
+        vulnerabilities: []
+      };
+    }
+
+    // Resolve the affected audits
+    const affectedAuditIds = [...new Set(vulnerabilities.map(v => v.auditId?.toString()))];
+    const relevantAudits = await Audit.find({ _id: { $in: affectedAuditIds }, userId }).lean();
+
+    const auditSummaries = relevantAudits.map(a => ({
+      id: a._id.toString(),
+      url: a.urlCible,
+      date: a.date,
+      score: a.scoreGlobal,
+      status: a.statut,
+      totalVulnerabilities: a.totalVulnerabilities,
+      intensity: a.intensity
+    }));
+
+    const vulnSummaries = vulnerabilities.map(v => ({
+      auditId: v.auditId?.toString(),
+      type: v.type,
+      severity: v.severity || v.niveauRisque,
+      endpoint: v.endpoint,
+      description: v.description,
+      technique: v.technique,
+      owasp: v.owasp_category,
+      cwe: v.cwe,
+      cvss: v.cvss_score,
+      payload: v.payload,
+      fix: v.fix_recommendation || v.recommandation
+    }));
+
+    return { audits: auditSummaries, vulnerabilities: vulnSummaries };
+  }
+
+  // General audit query (no specific type) — fetch recent audits + all their vulns
+  const audits = await Audit.find({ userId })
+    .sort({ date: -1 })
+    .limit(10)
+    .lean();
+
+  console.log(`[AuditContext] Found ${audits?.length || 0} audits for user ${userId}`);
+
+  if (!audits || audits.length === 0) return null;
+
+  const auditIds = audits.map(a => a._id);
+  const vulnerabilities = await Vulnerabilite.find({ auditId: { $in: auditIds } })
+    .sort({ detected_at: -1 })
+    .limit(20)
+    .lean();
+
+  console.log(`[AuditContext] Found ${vulnerabilities.length} vulnerabilities (general query)`);
+
+  const auditSummaries = audits.map(a => ({
+    id: a._id.toString(),
+    url: a.urlCible,
+    date: a.date,
+    score: a.scoreGlobal,
+    status: a.statut,
+    totalVulnerabilities: a.totalVulnerabilities,
+    intensity: a.intensity
+  }));
+
+  const vulnSummaries = vulnerabilities.map(v => ({
+    auditId: v.auditId?.toString(),
+    type: v.type,
+    severity: v.severity || v.niveauRisque,
+    endpoint: v.endpoint,
+    description: v.description,
+    technique: v.technique,
+    owasp: v.owasp_category,
+    cwe: v.cwe,
+    cvss: v.cvss_score,
+    payload: v.payload,
+    fix: v.fix_recommendation || v.recommandation
+  }));
+
+  return { audits: auditSummaries, vulnerabilities: vulnSummaries };
+}
+
+/**
+ * Builds a context prompt to inject audit data into the conversation
+ */
+function buildAuditContextPrompt(auditData) {
+  if (!auditData) return '';
+
+  if (auditData.vulnerabilities.length === 0) {
+    return "Aucun audit ne contient ce type de vulnérabilité.";
+  }
+
+  // Group vulnerabilities by audit URL + date
+  const auditMap = new Map();
+  for (const audit of auditData.audits) {
+    auditMap.set(audit.id, { url: audit.url, date: new Date(audit.date).toLocaleDateString('fr-FR') });
+  }
+
+  // Build a flat table: URL | Date | Endpoint
+  const rows = [];
+  for (const vuln of auditData.vulnerabilities) {
+    const audit = auditMap.get(vuln.auditId);
+    rows.push({
+      url: audit?.url || 'N/A',
+      date: audit?.date || 'N/A',
+      endpoint: vuln.endpoint || 'N/A'
+    });
+  }
+
+  // Deduplicate rows
+  const seen = new Set();
+  const uniqueRows = rows.filter(r => {
+    const key = `${r.url}|${r.date}|${r.endpoint}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  let response = `Voici les audits contenant cette vulnérabilité :\n\n`;
+  response += `| URL | Date | Endpoint |\n`;
+  response += `|-----|------|----------|\n`;
+  for (const r of uniqueRows) {
+    response += `| ${r.url} | ${r.date} | ${r.endpoint} |\n`;
+  }
+
+  return response;
+}
+
+/**
+ * Builds a strict system prompt for audit-related queries.
+ * This overrides the default cybersecurity expert prompt so the model
+ * ONLY responds with the user's real audit data from the DB.
+ */
+function buildAuditSystemPrompt() {
+  return `Tu es un assistant qui retourne des données d'audit. Tes réponses doivent être UNIQUEMENT le tableau Markdown fourni dans les données, sans aucun texte avant ou après.
+
+RÈGLES:
+- Copie EXACTEMENT le tableau (URL, Date, Endpoint) fourni dans les données.
+- N'ajoute RIEN d'autre : pas d'introduction, pas d'explication, pas de conseil, pas de commentaire.
+- Si les données indiquent "AUCUNE VULNÉRABILITÉ", réponds uniquement : "Aucun audit ne contient ce type de vulnérabilité."
+- Réponds en français.`;
+}
 
 /**
  * GET /api/chat/models
@@ -213,11 +423,25 @@ exports.sendMessage = async (req, res) => {
 
     await conversation.save();
 
-    // Préparer l'historique pour Ollama
-    const history = conversation.messages.slice(-10).map((msg) => ({
-      role: msg.role,
-      content: msg.content
-    }));
+    // ─── Audit context injection ─────────────────────────────
+    let enrichedMessage = message;
+    let auditDirectResponse = null;
+
+    if (isAuditRelatedQuery(message)) {
+      console.log('[Chat] Audit-related query detected, fetching context...');
+      try {
+        const auditData = await fetchAuditContext(userId, message);
+        if (auditData) {
+          auditDirectResponse = buildAuditContextPrompt(auditData);
+          console.log(`[Chat] Direct audit response built: ${auditData.audits.length} audits, ${auditData.vulnerabilities.length} vulns`);
+        } else {
+          auditDirectResponse = "Vous n'avez pas encore d'audits dans le système. Lancez d'abord un audit pour pouvoir consulter vos données.";
+        }
+      } catch (ctxErr) {
+        console.error('[Chat] Error fetching audit context:', ctxErr.message);
+      }
+    }
+    // ─── End audit context ───────────────────────────────────────────────
 
     // Configurer le streaming SSE
     res.setHeader('Content-Type', 'text/event-stream');
@@ -229,18 +453,34 @@ exports.sendMessage = async (req, res) => {
     let tokenCount = 0;
 
     try {
-      // Générer la réponse avec streaming
-      await OllamaService.generateStreamingResponse(
-        message,
-        history.slice(0, -1), // Exclure le dernier message (l'utilisateur)
-        model || conversation.model,
-        (token) => {
-          aiResponse += token;
-          tokenCount++;
-          // Envoyer le token au client
+      // If audit data found, return it DIRECTLY (bypass Ollama — the model ignores context)
+      if (auditDirectResponse) {
+        aiResponse = auditDirectResponse;
+        tokenCount = aiResponse.split(/\s+/).length;
+        // Stream the response token by token for consistent UX
+        const words = aiResponse.split(' ');
+        for (const word of words) {
+          const token = word + ' ';
           res.write(`data: ${JSON.stringify({ token, done: false })}\n\n`);
         }
-      );
+      } else {
+        // Normal flow — use Ollama for non-audit queries
+        const history = conversation.messages.slice(-10).map((msg) => ({
+          role: msg.role,
+          content: msg.content
+        }));
+
+        await OllamaService.generateStreamingResponse(
+          enrichedMessage,
+          history.slice(0, -1),
+          model || conversation.model,
+          (token) => {
+            aiResponse += token;
+            tokenCount++;
+            res.write(`data: ${JSON.stringify({ token, done: false })}\n\n`);
+          }
+        );
+      }
 
       // Ajouter la réponse IA à la conversation
       conversation.messages.push({
