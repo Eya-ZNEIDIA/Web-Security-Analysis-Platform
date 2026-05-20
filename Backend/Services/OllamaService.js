@@ -10,7 +10,7 @@ const url = require('url');
 class OllamaService {
   constructor() {
     this.ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
-    this.defaultModel = process.env.OLLAMA_MODEL || 'mistral';
+    this.defaultModel = process.env.OLLAMA_MODEL || 'ollama';
     this.timeout = parseInt(process.env.OLLAMA_TIMEOUT || '120000', 10);
   }
 
