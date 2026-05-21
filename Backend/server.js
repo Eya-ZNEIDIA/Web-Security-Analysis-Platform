@@ -61,17 +61,24 @@ app.use("/api/admin/settings", adminSettingsRoutes);
 
 app.post("/api/audit/launch", protect, async (req, res) => {
   const { targetUrl, intensity } = req.body;
-  const userId = req.user.id; // ✅ Récupère l'ID de l'utilisateur depuis le middleware
+  const userId = req.user.id;
   
   try {
     if (!userId) {
       return res.status(401).json({ success: false, message: "Utilisateur non authentifié" });
     }
 
+    // ✅ Validation de l'URL avant lancement
+    const { validateUrl } = require("./utils/urlValidator");
+    const validation = validateUrl(targetUrl);
+    if (!validation.isValid) {
+      return res.status(400).json({ success: false, message: validation.error || "URL invalide" });
+    }
+
     const result = await AuditService.launchAudit({ 
-      targetUrl, 
+      targetUrl: validation.cleanUrl, 
       intensity: intensity || "medium",
-      userId // ✅ Passe le userId au service
+      userId
     });
     
     res.status(201).json(result);
