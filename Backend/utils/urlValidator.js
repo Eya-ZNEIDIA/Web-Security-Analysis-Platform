@@ -80,6 +80,14 @@ const validateUrl = (urlString) => {
 
   const hostname = urlObj.hostname.toLowerCase();
 
+  // ✅ Vérification 6b: Le domaine doit contenir au moins un point (TLD requis)
+  if (!hostname.includes('.') && !/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) && !/^\[/.test(hostname)) {
+    return {
+      isValid: false,
+      error: 'URL invalide — le domaine doit contenir une extension (ex: .com, .fr)',
+    };
+  }
+
   // ✅ Vérification 7: Rejeter les adresses locales (sécurité - SSRF prevention)
   const localPatterns = [
     'localhost',

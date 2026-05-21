@@ -561,7 +561,7 @@ export default function Labs() {
       }, 700);
     } catch (err) {
       console.error("❌ Scan error:", err);
-      setScanError(err?.message || "Erreur inconnue lors du scan");
+      setScanError(err?.response?.data?.message || err?.message || "Erreur inconnue lors du scan");
       clearTimers();
 
       if (auditId) {
